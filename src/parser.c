@@ -24,7 +24,8 @@ int parse_command(char *input, char **cmd_argv, int *is_background) {
     while (token != NULL) {
         if (argc >= MAX_ARGS - 1) {
             fprintf(stderr, "shell: too many arguments\n");
-            break;
+            cmd_argv[0] = NULL;
+            return -1;
         }
         cmd_argv[argc++] = token;
         token = strtok(NULL, " \t");

@@ -2,7 +2,10 @@
 // Created by Terminal Void on 2026/7/7.
 //
 
-#include "../include/prompt.h"
+#include "prompt.h"
+
+#include <assert.h>
+
 #include "shell.h"
 
 #include <stdio.h>
@@ -11,30 +14,29 @@
 #include <unistd.h>
 
 static int format_cwd_with_tilde(const char *cwd, char *buf, size_t buf_size) {
+    assert(buf != NULL);
+    assert(buf_size !=0 );
+
     const char *home = getenv("HOME");
 
-    if (buf_size == 0) {
-        return -1;
-    }
-
     if (home == NULL || home[0] == '\0') {
-        int written = snprintf(buf, buf_size, "%s", cwd);
+        const int written = snprintf(buf, buf_size, "%s", cwd);
         return written < 0 || (size_t)written >= buf_size ? -1 : 0;
     }
 
     size_t home_len = strlen(home);
 
     if (strcmp(cwd, home) == 0) {
-        int written = snprintf(buf, buf_size, "~");
+        const int written = snprintf(buf, buf_size, "~");
         return written < 0 || (size_t)written >= buf_size ? -1 : 0;
     }
 
     if (strncmp(cwd, home, home_len) == 0 && cwd[home_len] == '/') {
-        int written = snprintf(buf, buf_size, "~%s", cwd + home_len);
+        const int written = snprintf(buf, buf_size, "~%s", cwd + home_len);
         return written < 0 || (size_t)written >= buf_size ? -1 : 0;
     }
 
-    int written = snprintf(buf, buf_size, "%s", cwd);
+    const int written = snprintf(buf, buf_size, "%s", cwd);
     return written < 0 || (size_t)written >= buf_size ? -1 : 0;
 }
 

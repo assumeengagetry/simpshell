@@ -17,11 +17,14 @@ static int job_count = 0;
 Job *get_job_by_id(const int job_id) {
     const int index = job_id - 1;
     assert(job_id>0 && job_id <= MAX_JOBS);
-    return &job_table[index];
+    if (job_table[index].status != DONE) {
+        return &job_table[index];
+    }
+    return NULL;
 }
 
-int create_job(const pid_t pid, const char *cmd) {
-    assert(pid > 0);
+int create_job(const pid_t pgid, const char *cmd) {
+    assert(pgid > 0);
     assert(cmd != NULL);
 
     for (int i = 0; i < MAX_JOBS; i++) {
@@ -29,7 +32,7 @@ int create_job(const pid_t pid, const char *cmd) {
         if (job_table[i].status == DONE) {
             const int job_id = i+1;
             job_table[i].job_id=job_id;
-            job_table[i].pid = pid;
+            job_table[i].pgid = pgid;
             job_table[i].status = RUNNING;
             strncpy(job_table[i].cmd,cmd,sizeof(job_table[i].cmd)-1);
             job_table[i].cmd[sizeof(job_table[i].cmd) - 1] = '\0';
@@ -65,15 +68,15 @@ void stop_job(const int job_id) {
     job_table[index].status = STOPPED;
 }
 
-void check_background_jobs() {
+void check_background_jobs(void) {
     int status;
     pid_t dead_pid;
 
-    while ((dead_pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
+    while ((dead_pid = waitpid(-1, &status, WNOHANG | WUNTRACED | WCONTINUED)) > 0) {
         // 查表：死掉的这个 PID 对应哪个 Job？
         for (int i = 0; i < MAX_JOBS; i++) {
             // DONE 就是我们定义的 0 (EMPTY)
-            if (job_table[i].status != DONE && job_table[i].pid == dead_pid) {
+            if (job_table[i].status != DONE && job_table[i].pgid == dead_pid) {
 
                 if (WIFEXITED(status) || WIFSIGNALED(status)) {
                     // 任务死透了，打印通知
@@ -84,8 +87,18 @@ void check_background_jobs() {
                     stop_job(i+1);
                     printf("\n[%d]  + suspended  %s\n", i + 1, job_table[i].cmd);
                 }
+                else if (WIFCONTINUED(status)) {
+                    run_job(i + 1);
+                }
                 break; // 找到了就跳出 for 循环，继续 while 查下一个
             }
         }
     }
+    if (dead_pid < 0 && errno != ECHILD) {
+        perror("waitpid");
+    }
+}
+
+int get_job_count(void) {
+    return job_count;
 }

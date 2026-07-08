@@ -5,7 +5,7 @@
 #ifndef SIMPSHELL_JOBS_H
 #define SIMPSHELL_JOBS_H
 #include "shell.h"
-#include <sys/wait.h>
+#include <sys/types.h>
 
 typedef enum {
     DONE=0,
@@ -15,14 +15,14 @@ typedef enum {
 
 typedef struct {
     int job_id;
-    pid_t pid;
+    pid_t pgid;
     char cmd[MAX_CMD_LEN];
     JobStatus status;
 } Job;
 
 //Job Control
 
-int create_job(pid_t pid, const char *cmd);
+int create_job(pid_t pgid, const char *cmd);
 void remove_job(int job_id);
 void run_job(int job_id);
 void stop_job(int job_id);

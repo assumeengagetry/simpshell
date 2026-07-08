@@ -14,11 +14,13 @@
 #include "builtins.h"
 #include "executor.h"
 #include "prompt.h"
+#include "terminal.h"
 
 
-int main(int argc, const char *argv[]) {
-    signal(SIGINT, SIG_IGN);
-    signal(SIGTSTP, SIG_IGN);
+int main(const int argc, const char *argv[]) {
+
+
+    init_shell();
 
     char input[MAX_CMD_LEN];
     char *cmd_argv[MAX_ARGS];
@@ -59,7 +61,7 @@ int main(int argc, const char *argv[]) {
         const BuiltinFunc builtin_func = get_builtin_func(cmd_argv[0]);
 
         if (builtin_func != NULL) {
-            int status = builtin_func(cmd_argv);
+            builtin_func(cmd_argv);
         }
         else {
             execute_external(cmd_argv,is_background);

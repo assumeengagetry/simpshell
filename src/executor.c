@@ -15,68 +15,141 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-int execute_external(char **argv,const int is_background) {
+#include "terminal.h"
+
+int execute_external(char **argv, const int is_background) {
     assert(argv != NULL);
     assert(argv[0] != NULL);
+
+    char cmd_string[1024] = {0};
+    size_t offset = 0;
+
+    for (int i = 0; argv[i] != NULL; i++) {
+        const size_t arg_len = strlen(argv[i]);
+
+        if (offset + arg_len + 2 >= sizeof(cmd_string)) {
+            break;
+        }
+
+        memcpy(cmd_string + offset, argv[i], arg_len);
+        offset += arg_len;
+
+        if (argv[i + 1] != NULL) {
+            cmd_string[offset++] = ' ';
+        }
+    }
+
+    cmd_string[offset] = '\0';
+
     const pid_t pid = fork();
+
     if (pid < 0) {
-        // 情况 A：克隆失败（极其罕见，通常是系统内存爆了，或者进程数达到了上限）
-        perror("fork failed");
+        perror("fork");
         return 1;
     }
-    if (pid == 0) {// Sub process
 
+    if (pid == 0) { //Child
+
+        if (setpgid(0, 0) < 0) {
+            perror("setpgid");
+            _exit(1);
+        }
+
+        //foreground child 也调用一次 tcsetpgrp()，parent 也调用一次，避免竞态
+        if (!is_background && is_shell_interactive()) {
+            if (give_terminal_to(getpid()) < 0) {
+                _exit(1);
+            }
+        }
+
+        //重置继承的信号行为
         signal(SIGINT, SIG_DFL);
+        signal(SIGQUIT, SIG_DFL);
         signal(SIGTSTP, SIG_DFL);
+        signal(SIGTTIN, SIG_DFL);
+        signal(SIGTTOU, SIG_DFL);
+        signal(SIGCHLD, SIG_DFL);
 
         execvp(argv[0], argv);
 
-        //如果运行到此处，说明execvp失败，子进程自杀
         perror(argv[0]);
-        exit(EXIT_FAILURE);
+        _exit(127);
     }
-    else { //Main process
-        char cmd_string[1024] = {0};
-        size_t offset = 0;
-        for (int i = 0; argv[i] != NULL; i++) {
-            const size_t arg_len = strlen(argv[i]);
-            if (offset + arg_len + 1 + 1 >= sizeof(cmd_string)) {
-                break;
-            }
-            memcpy(cmd_string + offset, argv[i], arg_len);
-            offset += arg_len;
-            if (argv[i + 1] != NULL) {
-                cmd_string[offset++] = ' ';
-            }
+
+    //Parent
+
+    const pid_t pgid = pid;
+
+    //Parent also calls setpgid to avoid a race with the child.
+    if (setpgid(pid, pgid) < 0) {
+        if (errno != EACCES && errno != ESRCH) {
+            perror("setpgid");
+            return 1;
         }
-        cmd_string[offset] = '\0';
+    }
 
-        if (!is_background) {
+    if (is_background) {
+        const int job_id = create_job(pgid, cmd_string);
 
-            int status;
-            do {
-                waitpid(pid, &status, WUNTRACED);
-            } while (!WIFEXITED(status) && !WIFSIGNALED(status) && !WIFSTOPPED(status));
-
-            if (WIFSTOPPED(status)) { //CTRL+Z
-
-                const int job_id = create_job(pid, cmd_string);
-                if (job_id != -1) {
-                    stop_job(job_id); // 建档后强制覆盖状态为暂停
-                    printf("\n[%d]  + suspended  %s\n", job_id, cmd_string);
-                }
-            }
-
+        if (job_id != -1) {
+            printf("[%d] %d\n", job_id, pgid);
+        } else {
+            fprintf(stderr, "Shell: maximum number of jobs exceeded\n");
         }
-        else {
-            const int job_id = create_job(pid, cmd_string);
-            if (job_id != -1) {
-                printf("[%d] %d\n", job_id, pid);
-            } else {
-                fprintf(stderr, "Shell: maximum number of jobs exceeded\n");
+
+        return 0;
+    }
+
+    /*
+     * Foreground job:
+     * give terminal to job's process group.
+     */
+    if (is_shell_interactive()) {
+        if (give_terminal_to(pgid) < 0) {
+            return 1;
+        }
+    }
+
+    int status;
+    int stopped = 0;
+
+    while (1) {
+        const pid_t waited = waitpid(-pgid, &status, WUNTRACED);
+
+        if (waited < 0) {
+            if (errno == EINTR) {
+                continue;
             }
 
+            perror("waitpid");
+            break;
+        }
 
+        if (WIFSTOPPED(status)) {
+            stopped = 1;
+            break;
+        }
+
+        if (WIFEXITED(status) || WIFSIGNALED(status)) {
+            break;
+        }
+    }
+
+    /*
+     * Shell must reclaim terminal after foreground job exits or stops.
+     */
+    if (is_shell_interactive()) {
+        reclaim_terminal();
+    }
+
+    if (stopped) {
+        const int job_id = create_job(pgid, cmd_string);
+
+        if (job_id != -1) {
+            stop_job(job_id);
+            printf("\n[%d]  + suspended  %s\n", job_id, cmd_string);
+        } else {
+            fprintf(stderr, "Shell: maximum number of jobs exceeded\n");
         }
     }
 
