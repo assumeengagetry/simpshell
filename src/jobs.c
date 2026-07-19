@@ -1,7 +1,7 @@
 //
 // Created by Terminal Void on 2026/7/7.
 //
-#include "jobs.h"
+#include "../include/jobs.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -9,7 +9,8 @@
 #include <errno.h>
 #include <sys/wait.h>
 
-#include "shell.h"
+#include "../include/shell.h"
+
 
 static Job job_table[MAX_JOBS];
 static int job_count = 0;
